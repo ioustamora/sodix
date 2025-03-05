@@ -1,0 +1,10 @@
+[package]
+name = "sodix"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+dryoc = "0.6.2"
+clap = { version = "4.5.31", features = ["derive"] }
+hex = "0.4.3"
+rand = "0.9.0"
