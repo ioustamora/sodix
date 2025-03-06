@@ -7,8 +7,8 @@ use dryoc::types::StackByteArray;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::io::{self, Write};
-use rand::thread_rng; // Use non-deprecated thread_rng
-use rand::RngCore;
+use rand::rngs::StdRng;
+use rand::{Rng, SeedableRng};
 
 #[derive(Parser)]
 #[command(name = "sodix", about = "sodix - libsodium compatible cli tool")]
@@ -23,52 +23,55 @@ struct Cli {
 #[derive(Subcommand)]
 enum Commands {
     /// Sign a message or file
+    #[command(visible_alias = "s")]
     Sign {
         input: String,
-        #[arg(long)]
+        #[arg(long, short = 'k')]
         key: Option<PathBuf>,
-        #[arg(long)]
+        #[arg(long, short = 'f')]
         file: bool,
     },
     /// Verify a signature
+    #[command(visible_alias = "c")]
     Check {
         input: String,
         signature: String,
-        #[arg(long)]
+        #[arg(long, short = 'k')]
         key: Option<PathBuf>,
-        #[arg(long)]
+        #[arg(long, short = 'f')]
         file: bool,
     },
-    /// Encrypt a message or file (nonce embedded in output)
+    /// Encrypt a message or file
+    #[command(visible_alias = "e")] 
     Encrypt {
         input: String,
-        #[arg(long)]
+        #[arg(long, short = 'k')]
         key: Option<PathBuf>,
-        #[arg(long)]
+        #[arg(long, short = 'f')]
         file: bool,
     },
-    /// Decrypt a ciphertext (nonce extracted from input)
+    /// Decrypt a message or file
+    #[command(visible_alias = "d")]
     Decrypt {
         input: String,
-        #[arg(long)]
+        #[arg(long, short = 'k')]
         key: Option<PathBuf>,
-        #[arg(long)]
+        #[arg(long, short = 'f')]
         file: bool,
     },
-    /// Generate key pairs for signing and encryption (overwrites existing keys)
+    /// Generate new keypairs
+    #[command(visible_alias = "g")]
     Generate {
-        /// Optional directory for keys (defaults to executable dir); overwrites if exists
-        #[arg(long)]
+        #[arg(long, short = 'k')]
         key: Option<PathBuf>,
     },
-    /// Print encryption/decryption and signing keys
+    /// Print keys
+    #[command(visible_alias = "p")]
     Print {
-        /// Optional directory for keys (defaults to executable dir)
-        #[arg(long)]
+        #[arg(long, short = 'k')]
         key: Option<PathBuf>,
     },
 }
-
 fn get_default_key_path(key_type: &str) -> PathBuf {
     std::env::current_exe()
         .unwrap()
@@ -149,6 +152,10 @@ fn load_or_generate_encryption_key(path: &Path, is_secret: bool, verbose: bool) 
 }
 
 fn generate_keys(dir: &Path, verbose: bool) -> Result<(), String> {
+    // Create directory if it doesn't exist
+    fs::create_dir_all(dir)
+        .map_err(|e| format!("Failed to create directory {}: {}", dir.display(), e))?;
+
     let sign_keypair: SigningKeyPair<StackByteArray<32>, StackByteArray<64>> = SigningKeyPair::gen();
     let sign_public_key_path = dir.join("sign_public.key");
     let sign_secret_key_path = dir.join("sign_secret.key");
@@ -261,7 +268,9 @@ fn main() -> Result<(), String> {
             }?;
 
             let mut nonce = [0u8; 24];
-            thread_rng().fill_bytes(&mut nonce); // Updated to remove deprecation warning
+            let mut rng = StdRng::seed_from_u64(42); // Seed with a u64 value
+            rng.fill(&mut nonce);
+
             let mut ciphertext = vec![0u8; data.len() + 16];
             crypto_box_easy(&mut ciphertext, &data, &nonce, &pk, &sk)
                 .map_err(|e| format!("Error encrypting data: {}", e))?;
@@ -291,13 +300,22 @@ fn main() -> Result<(), String> {
 
             let pk: [u8; 32] = pk_vec.as_slice().try_into().map_err(|_| "Public key must be 32 bytes")?;
             let sk: [u8; 32] = sk_vec.as_slice().try_into().map_err(|_| "Secret key must be 32 bytes")?;
-            let combined = if file {
+            
+            let (combined, output_path) = if file {
                 let encrypted_file = if input.ends_with(".x") { input.clone() } else { format!("{}.x", input) };
-                hex::decode(fs::read_to_string(&encrypted_file)
-                    .map_err(|e| format!("Failed to read encrypted file {}: {}", encrypted_file, e))?)
-                    .map_err(|e| format!("Invalid hex in file {}: {}", encrypted_file, e))?
+                let output_file = if encrypted_file.ends_with(".x") {
+                    encrypted_file[..encrypted_file.len()-2].to_string()
+                } else {
+                    encrypted_file.clone()
+                };
+                (
+                    hex::decode(fs::read_to_string(&encrypted_file)
+                        .map_err(|e| format!("Failed to read encrypted file {}: {}", encrypted_file, e))?)
+                        .map_err(|e| format!("Invalid hex in file {}: {}", encrypted_file, e))?,
+                    Some(output_file)
+                )
             } else {
-                hex::decode(&input).map_err(|e| format!("Invalid hex input: {}", e))?
+                (hex::decode(&input).map_err(|e| format!("Invalid hex input: {}", e))?, None)
             };
 
             if combined.len() < 24 + 16 {
@@ -305,13 +323,22 @@ fn main() -> Result<(), String> {
             }
             let nonce: [u8; 24] = combined[..24].try_into().unwrap();
             let ciphertext = &combined[24..];
-            let mut plaintext = vec![0u8; ciphertext.len() - 16]; // Fixed: Use ciphertext length minus MAC
+            let mut plaintext = vec![0u8; ciphertext.len() - 16];
             crypto_box_open_easy(&mut plaintext, ciphertext, &nonce, &pk, &sk)
                 .map_err(|e| format!("Error decrypting data: {}", e))?;
-            io::stdout()
-                .write_all(&plaintext)
-                .map_err(|e| format!("Failed to write decrypted data: {}", e))?;
-            io::stdout().flush().map_err(|e| format!("Failed to flush output: {}", e))?;
+
+            if let Some(output_file) = output_path {
+                fs::write(&output_file, &plaintext)
+                    .map_err(|e| format!("Failed to write decrypted file {}: {}", output_file, e))?;
+                if verbose {
+                    println!("Decrypted file saved to: {}", output_file);
+                }
+            } else {
+                io::stdout()
+                    .write_all(&plaintext)
+                    .map_err(|e| format!("Failed to write decrypted data: {}", e))?;
+                io::stdout().flush().map_err(|e| format!("Failed to flush output: {}", e))?;
+            }
         }
 
         Commands::Generate { key } => {

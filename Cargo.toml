@@ -2,6 +2,22 @@
 name = "sodix"
 version = "0.1.0"
 edition = "2021"
+description = "CLI tool providing libsodium-compatible cryptographic operations. Uses Ed25519 for signing and Curve25519 for encryption, with hex-encoded keys for easy scripting. SH/BASH friendly and user friendly vith -v and -h flags."
+license = "MIT"
+authors = ["Stanislav Saveliev <ioustamora@gmail.com>"]
+repository = "https://github.com/ioustamora/sodix"
+readme = "README.md"
+keywords = ["sodix", "libsodium"]
+exclude = [
+    ".git*",
+    "target/*",
+    "assets/*",
+    "tests/*",
+]
+
+[[bin]]
+name = "sodix"
+path = "src/main.rs"
 
 [dependencies]
 dryoc = "0.6.2"

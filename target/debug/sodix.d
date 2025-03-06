@@ -1,1 +1,1 @@
-C:\Users\stani\RustroverProjects\datiz\sodix\target\debug\sodix.exe: C:\Users\stani\RustroverProjects\datiz\sodix\src\main.rs
+/media/user/btfs/utils/sodix/target/debug/sodix: /media/user/btfs/utils/sodix/src/main.rs
