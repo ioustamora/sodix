@@ -46,7 +46,9 @@ enum Commands {
     Encrypt {
         input: String,
         #[arg(long, short = 'k')]
-        key: Option<PathBuf>,
+        pubkey: Option<String>,  // Receiver's public key in hex
+        #[arg(long, short = 's')]
+        seckey: Option<String>,  // Sender's secret key in hex
         #[arg(long, short = 'f')]
         file: bool,
     },
@@ -55,7 +57,9 @@ enum Commands {
     Decrypt {
         input: String,
         #[arg(long, short = 'k')]
-        key: Option<PathBuf>,
+        pubkey: Option<String>,  // Sender's public key in hex
+        #[arg(long, short = 's')]
+        seckey: Option<String>,  // Receiver's secret key in hex
         #[arg(long, short = 'f')]
         file: bool,
     },
@@ -185,10 +189,23 @@ fn generate_keys(dir: &Path, verbose: bool) -> Result<(), String> {
 }
 
 fn print_keys(dir: &Path, verbose: bool) -> Result<(), String> {
+    // Create directory if it doesn't exist
+    fs::create_dir_all(dir)
+        .map_err(|e| format!("Failed to create directory {}: {}", dir.display(), e))?;
+
+    // Generate both key pairs if any key file is missing
     let sign_public_key_path = dir.join("sign_public.key");
     let sign_secret_key_path = dir.join("sign_secret.key");
     let enc_public_key_path = dir.join("enc_public.key");
     let enc_secret_key_path = dir.join("enc_secret.key");
+
+    if !sign_public_key_path.exists() || !sign_secret_key_path.exists() 
+        || !enc_public_key_path.exists() || !enc_secret_key_path.exists() {
+        if verbose {
+            println!("Some keys missing, generating new keypairs...");
+        }
+        generate_keys(dir, verbose)?;
+    }
 
     let sign_pk = load_key(&sign_public_key_path, 32).map(|k| hex::encode(k))?;
     let sign_sk = load_key(&sign_secret_key_path, 64).map(|k| hex::encode(k))?;
@@ -207,6 +224,13 @@ fn print_keys(dir: &Path, verbose: bool) -> Result<(), String> {
         println!("{}", enc_sk);  // Line 4: Encryption Secret Key
     }
     Ok(())
+}
+
+fn parse_hex_key(hex_key: &str) -> Result<[u8; 32], String> {
+    let key_vec = hex::decode(hex_key)
+        .map_err(|e| format!("Invalid hex key: {}", e))?;
+    key_vec.try_into()
+        .map_err(|_| "Public key must be 32 bytes".to_string())
 }
 
 fn main() -> Result<(), String> {
@@ -253,14 +277,25 @@ fn main() -> Result<(), String> {
             }
         }
 
-        Commands::Encrypt { input, key, file } => {
-            let public_key_path = key.unwrap_or_else(|| get_default_key_path("enc_public"));
-            let pk_vec = load_or_generate_encryption_key(&public_key_path, false, verbose)?;
-            let secret_key_path = get_default_key_path("enc_secret");
-            let sk_vec = load_or_generate_encryption_key(&secret_key_path, true, verbose)?;
+        Commands::Encrypt { input, pubkey, seckey, file } => {
+            let pk = match pubkey {
+                Some(hex_key) => parse_hex_key(&hex_key)?,
+                None => {
+                    let public_key_path = get_default_key_path("enc_public");
+                    let pk_vec = load_or_generate_encryption_key(&public_key_path, false, verbose)?;
+                    pk_vec.try_into().map_err(|_| "Public key must be 32 bytes")?
+                }
+            };
+            
+            let sk = match seckey {
+                Some(hex_key) => parse_hex_key(&hex_key)?,
+                None => {
+                    let secret_key_path = get_default_key_path("enc_secret");
+                    let sk_vec = load_or_generate_encryption_key(&secret_key_path, true, verbose)?;
+                    sk_vec.try_into().map_err(|_| "Secret key must be 32 bytes")?
+                }
+            };
 
-            let pk: [u8; 32] = pk_vec.as_slice().try_into().map_err(|_| "Public key must be 32 bytes")?;
-            let sk: [u8; 32] = sk_vec.as_slice().try_into().map_err(|_| "Secret key must be 32 bytes")?;
             let data = if file {
                 fs::read(&input).map_err(|e| format!("Failed to read input file {}: {}", input, e))
             } else {
@@ -292,14 +327,24 @@ fn main() -> Result<(), String> {
             }
         }
 
-        Commands::Decrypt { input, key, file } => {
-            let secret_key_path = key.unwrap_or_else(|| get_default_key_path("enc_secret"));
-            let sk_vec = load_or_generate_encryption_key(&secret_key_path, true, verbose)?;
-            let public_key_path = get_default_key_path("enc_public");
-            let pk_vec = load_or_generate_encryption_key(&public_key_path, false, verbose)?;
+        Commands::Decrypt { input, pubkey, seckey, file } => {
+            let pk = match pubkey {
+                Some(hex_key) => parse_hex_key(&hex_key)?,
+                None => {
+                    let public_key_path = get_default_key_path("enc_public");
+                    let pk_vec = load_or_generate_encryption_key(&public_key_path, false, verbose)?;
+                    pk_vec.try_into().map_err(|_| "Public key must be 32 bytes")?
+                }
+            };
 
-            let pk: [u8; 32] = pk_vec.as_slice().try_into().map_err(|_| "Public key must be 32 bytes")?;
-            let sk: [u8; 32] = sk_vec.as_slice().try_into().map_err(|_| "Secret key must be 32 bytes")?;
+            let sk = match seckey {
+                Some(hex_key) => parse_hex_key(&hex_key)?,
+                None => {
+                    let secret_key_path = get_default_key_path("enc_secret");
+                    let sk_vec = load_or_generate_encryption_key(&secret_key_path, true, verbose)?;
+                    sk_vec.try_into().map_err(|_| "Secret key must be 32 bytes")?
+                }
+            };
             
             let (combined, output_path) = if file {
                 let encrypted_file = if input.ends_with(".x") { input.clone() } else { format!("{}.x", input) };

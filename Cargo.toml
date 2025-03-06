@@ -1,6 +1,6 @@
 [package]
 name = "sodix"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = "CLI tool providing libsodium-compatible cryptographic operations. Uses Ed25519 for signing and Curve25519 for encryption, with hex-encoded keys for easy scripting. SH/BASH friendly and user friendly vith -v and -h flags."
 license = "MIT"

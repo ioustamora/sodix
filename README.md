@@ -8,25 +8,26 @@ A Rust CLI tool providing libsodium-compatible cryptographic operations. Uses Ed
 # Install
 cargo install sodix
 
-# Generate keys
+# Generate and Print Keys
 sodix generate     # Creates key files in current directory
 sodix generate -k /path/to/keys   # Custom key location
-
-# Key operations
-sodix print        # Show all keys
-sodix print -p     # Show only public keys
+sodix print        # Show all keys (generates if missing)
 
 # Sign/Verify
-sodix sign "message"
-sodix sign -f document.txt
-sodix check "message" <signature>
-sodix check -f document.txt <signature>
+sodix s "message"          # Short alias for sign
+sodix sign -f file.txt     # Sign a file
+sodix c "message" <sig>    # Short alias for check
+sodix check -f file.txt <sig>
 
-# Encrypt/Decrypt
-sodix encrypt "secret"
-sodix encrypt -f secret.txt   # Creates secret.txt.x
-sodix decrypt <ciphertext>
-sodix decrypt -f secret.txt.x
+# Encrypt/Decrypt with file-based keys
+sodix e "secret"           # Uses local key files
+sodix encrypt -f file.txt  # Creates file.txt.x
+sodix d <ciphertext>       # Uses local key files
+sodix decrypt -f file.txt.x
+
+# Encrypt/Decrypt with hex keys
+sodix e -k <receiver_pubkey> -s <sender_seckey> "message"
+sodix d -k <sender_pubkey> -s <receiver_seckey> <ciphertext>
 ```
 
 ## Features
@@ -59,14 +60,45 @@ with open("enc_public.key") as f:
     public_key = PublicKey(binascii.unhexlify(f.read().strip()))
 ```
 
-## Scripting Example
+## Python Integration Example
+```python
+from nacl.public import PrivateKey, PublicKey
+import binascii
+
+# Generate keys
+sender_private = PrivateKey.generate()
+sender_public = sender_private.public_key
+receiver_private = PrivateKey.generate()
+receiver_public = receiver_private.public_key
+
+# Convert to hex for sodix
+sender_sec = binascii.hexlify(bytes(sender_private)).decode()
+sender_pub = binascii.hexlify(bytes(sender_public)).decode()
+receiver_pub = binascii.hexlify(bytes(receiver_public)).decode()
+receiver_sec = binascii.hexlify(bytes(receiver_private)).decode()
+
+# Encrypt: sender -> receiver
+# $ sodix e -k <receiver_pub> -s <sender_sec> "secret"
+
+# Decrypt: receiver gets message from sender
+# $ sodix d -k <sender_pub> -s <receiver_sec> <ciphertext>
+```
+
+## Shell Script Example
 
 ```bash
 #!/bin/sh
-sig=$(sodix sign "Hello") || exit 1
-sodix check "Hello" "$sig" || exit 1
-enc=$(sodix encrypt "Secret") || exit 1
-sodix decrypt "$enc"
+# Generate keys if needed
+keys=$(sodix print) || exit 1
+
+# Get public key (first line)
+pubkey=$(echo "$keys" | head -n1)
+
+# Encrypt and decrypt
+msg="Hello World"
+enc=$(sodix e -k "$pubkey" "$msg") || exit 1
+dec=$(sodix d "$enc") || exit 1
+echo "Decrypted: $dec"
 ```
 
 ## Build
