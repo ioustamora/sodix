@@ -9,25 +9,27 @@ A Rust CLI tool providing libsodium-compatible cryptographic operations. Uses Ed
 cargo install sodix
 
 # Generate and Print Keys
-sodix generate     # Creates key files in current directory
-sodix generate -k /path/to/keys   # Custom key location
-sodix print        # Show all keys (generates if missing)
+sodix g                    # Generate keys in current directory
+sodix generate -k /path    # Generate keys in specific path
+sodix p                    # Print all keys (generates if missing)
+sodix print -k /path      # Print keys from specific path
 
 # Sign/Verify
-sodix s "message"          # Short alias for sign
-sodix sign -f file.txt     # Sign a file
-sodix c "message" <sig>    # Short alias for check
-sodix check -f file.txt <sig>
+sodix s "message"                     # Sign with default key file
+sodix sign -k <hex_secret_key> "msg"  # Sign with hex key
+sodix sign -f document.txt            # Sign file
+sodix c "message" <signature>         # Check with default key
+sodix check -k <hex_public_key> "message" <signature>
 
 # Encrypt/Decrypt with file-based keys
-sodix e "secret"           # Uses local key files
+sodix e "message"          # Use default keys
 sodix encrypt -f file.txt  # Creates file.txt.x
-sodix d <ciphertext>       # Uses local key files
-sodix decrypt -f file.txt.x
+sodix d <ciphertext>       # Use default keys
+sodix decrypt -f file.txt  # Decrypts file.txt.x
 
 # Encrypt/Decrypt with hex keys
-sodix e -k <receiver_pubkey> -s <sender_seckey> "message"
-sodix d -k <sender_pubkey> -s <receiver_seckey> <ciphertext>
+sodix e -k <receiver_pub> -s <sender_sec> "message"
+sodix d -k <sender_pub> -s <receiver_sec> <ciphertext>
 ```
 
 ## Features
@@ -48,16 +50,27 @@ sodix d -k <sender_pubkey> -s <receiver_seckey> <ciphertext>
 ## Python Integration
 
 ```python
-from nacl.signing import VerifyKey
-from nacl.public import PublicKey, PrivateKey
+from nacl.signing import SigningKey, VerifyKey
+from nacl.public import PrivateKey, PublicKey
 import binascii
 
-# Load Sodix-generated keys
-with open("sign_public.key") as f:
-    verify_key = VerifyKey(binascii.unhexlify(f.read().strip()))
+# Signing Example
+signing_key = SigningKey.generate()
+signing_hex = binascii.hexlify(bytes(signing_key)).decode()
 
-with open("enc_public.key") as f:
-    public_key = PublicKey(binascii.unhexlify(f.read().strip()))
+# Sign with sodix using hex key
+# $ sodix sign -k <signing_hex> "message"
+
+# Encryption Example
+private = PrivateKey.generate()
+public = private.public_key
+
+# Get hex format keys
+priv_hex = binascii.hexlify(bytes(private)).decode()
+pub_hex = binascii.hexlify(bytes(public)).decode()
+
+# Encrypt: sender -> receiver
+# $ sodix e -k <pub_hex> -s <priv_hex> "secret"
 ```
 
 ## Python Integration Example
@@ -88,17 +101,22 @@ receiver_sec = binascii.hexlify(bytes(receiver_private)).decode()
 
 ```bash
 #!/bin/sh
-# Generate keys if needed
-keys=$(sodix print) || exit 1
+# Get default keys
+keys=$(sodix p) || exit 1
 
-# Get public key (first line)
-pubkey=$(echo "$keys" | head -n1)
+# Extract keys (one per line)
+sign_pub=$(echo "$keys" | sed -n '1p')
+sign_sec=$(echo "$keys" | sed -n '2p')
+enc_pub=$(echo "$keys" | sed -n '3p')
+enc_sec=$(echo "$keys" | sed -n '4p')
 
-# Encrypt and decrypt
-msg="Hello World"
-enc=$(sodix e -k "$pubkey" "$msg") || exit 1
-dec=$(sodix d "$enc") || exit 1
-echo "Decrypted: $dec"
+# Use keys
+sig=$(sodix s -k "$sign_sec" "Hello") || exit 1
+sodix c -k "$sign_pub" "Hello" "$sig" || exit 1
+
+enc=$(sodix e -k "$enc_pub" -s "$enc_sec" "Secret") || exit 1
+dec=$(sodix d -k "$enc_pub" -s "$enc_sec" "$enc")
+echo "$dec"
 ```
 
 ## Build
