@@ -27,7 +27,7 @@ enum Commands {
     Sign {
         input: String,
         #[arg(long, short = 'k')]
-        key: Option<PathBuf>,
+        key: Option<String>,  // Changed from PathBuf to String
         #[arg(long, short = 'f')]
         file: bool,
     },
@@ -37,7 +37,7 @@ enum Commands {
         input: String,
         signature: String,
         #[arg(long, short = 'k')]
-        key: Option<PathBuf>,
+        key: Option<String>,  // Changed from PathBuf to String
         #[arg(long, short = 'f')]
         file: bool,
     },
@@ -100,13 +100,22 @@ fn load_key(path: &Path, expected_size: usize) -> Result<Vec<u8>, String> {
     Ok(key_bytes)
 }
 
-fn load_or_generate_signing_key(path: &Path, is_secret: bool, verbose: bool) -> Result<Vec<u8>, String> {
+fn load_or_generate_signing_key(key_input: &str, is_secret: bool, verbose: bool) -> Result<Vec<u8>, String> {
+    // Check if key_input is a valid hex string of the expected length
+    let expected_size = if is_secret { 64 } else { 32 };
+    if let Ok(key_bytes) = hex::decode(key_input.trim()) {
+        if key_bytes.len() == expected_size {
+            return Ok(key_bytes);  // Use the hex string directly
+        }
+    }
+
+    // Treat key_input as a file path
+    let path = Path::new(key_input);
     if path.exists() {
-        let expected_size = if is_secret { 64 } else { 32 };
         load_key(path, expected_size)
     } else {
         let keypair: SigningKeyPair<StackByteArray<32>, StackByteArray<64>> = SigningKeyPair::gen();
-        let dir = path.parent().unwrap();
+        let dir = path.parent().unwrap_or_else(|| Path::new("."));
         let public_key_path = dir.join("sign_public.key");
         let secret_key_path = dir.join("sign_secret.key");
         fs::write(&public_key_path, hex::encode(&keypair.public_key))
@@ -239,8 +248,8 @@ fn main() -> Result<(), String> {
 
     match cli.command {
         Commands::Sign { input, key, file } => {
-            let secret_key_path = key.unwrap_or_else(|| get_default_key_path("sign_secret"));
-            let sk = load_or_generate_signing_key(&secret_key_path, true, verbose)?;
+            let secret_key_input = key.unwrap_or_else(|| get_default_key_path("sign_secret").to_string_lossy().into_owned());
+            let sk = load_or_generate_signing_key(&secret_key_input, true, verbose)?;
             let data = if file {
                 fs::read(&input).map_err(|e| format!("Failed to read input file {}: {}", input, e))
             } else {
@@ -253,8 +262,8 @@ fn main() -> Result<(), String> {
         }
 
         Commands::Check { input, signature, key, file } => {
-            let public_key_path = key.unwrap_or_else(|| get_default_key_path("sign_public"));
-            let pk = load_or_generate_signing_key(&public_key_path, false, verbose)?;
+            let public_key_input = key.unwrap_or_else(|| get_default_key_path("sign_public").to_string_lossy().into_owned());
+            let pk = load_or_generate_signing_key(&public_key_input, false, verbose)?;
             let data = if file {
                 fs::read(&input).map_err(|e| format!("Failed to read input file {}: {}", input, e))
             } else {
